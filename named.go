@@ -224,29 +224,41 @@ func bindStruct(bindType int, query string, arg interface{}, m *reflectx.Mapper)
 	return bound, arglist, nil
 }
 
-var valueBracketReg = regexp.MustCompile(`(?i)VALUES\s*(\([^(]*.[^(]\))`)
+var valuesReg = regexp.MustCompile(`\W+(?i)VALUES\s*\(`)
 
 func fixBound(bound string, loop int) string {
+	loc := valuesReg.FindStringIndex(bound)
+	if len(loc) < 2 {
+		return bound
+	}
 
-	loc := valueBracketReg.FindAllStringSubmatchIndex(bound, -1)
-	// Either no VALUES () found or more than one found??
-	if len(loc) != 1 {
-		return bound
+	start := loc[1] - 1
+	end := start
+	bracketCnt := 0
+	for i := start; i < len(bound); i++ {
+		if bound[i] == '(' {
+			if bracketCnt == 0 {
+				start = i
+			}
+			bracketCnt++
+		}
+		if bound[i] == ')' {
+			bracketCnt--
+			if bracketCnt == 0 {
+				end = i + 1
+				break
+			}
+		}
 	}
-	// defensive guard. loc should be len 4 representing the starting and
-	// ending index for the whole regex match and the starting + ending
-	// index for the single inside group
-	if len(loc[0]) != 4 {
-		return bound
-	}
+
 	var buffer bytes.Buffer
-
-	buffer.WriteString(bound[0:loc[0][1]])
-	for i := 0; i < loop-1; i++ {
-		buffer.WriteString(",")
-		buffer.WriteString(bound[loc[0][2]:loc[0][3]])
+	buffer.WriteString(bound[:end])
+	for i := 1; i < loop; i++ {
+		buffer.WriteRune(',')
+		buffer.WriteString(bound[start:end])
 	}
-	buffer.WriteString(bound[loc[0][1]:])
+	buffer.WriteString(bound[end:])
+
 	return buffer.String()
 }
 

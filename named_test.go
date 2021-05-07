@@ -3,7 +3,6 @@ package sqlx
 import (
 	"database/sql"
 	"fmt"
-	"regexp"
 	"testing"
 )
 
@@ -339,7 +338,7 @@ func TestFixBounds(t *testing.T) {
 		{
 			name:   `found twice test`,
 			query:  `INSERT INTO foo (a,b,c,d) VALUES (:name, :age, :first, :last) VALUES (:name, :age, :first, :last)`,
-			expect: `INSERT INTO foo (a,b,c,d) VALUES (:name, :age, :first, :last) VALUES (:name, :age, :first, :last)`,
+			expect: `INSERT INTO foo (a,b,c,d) VALUES (:name, :age, :first, :last),(:name, :age, :first, :last) VALUES (:name, :age, :first, :last)`,
 			loop:   2,
 		},
 		{
@@ -354,6 +353,73 @@ func TestFixBounds(t *testing.T) {
 			expect: `INSERT INTO foo (a,b) values(:a, :b),(:a, :b)`,
 			loop:   2,
 		},
+		{
+			name: `multiline indented query`,
+			query: `INSERT INTO foo (
+		a,
+		b,
+		c,
+		d
+	) VALUES (
+		:name,
+		:age,
+		:first,
+		:last
+	)`,
+			expect: `INSERT INTO foo (
+		a,
+		b,
+		c,
+		d
+	) VALUES (
+		:name,
+		:age,
+		:first,
+		:last
+	),(
+		:name,
+		:age,
+		:first,
+		:last
+	)`,
+			loop: 2,
+		},
+		{
+			name:   `on duplicate key update`,
+			query:  `INSERT INTO foo (a,b,c,d) VALUES (:name, :age, :first, :last) ON DUPLICATE KEY UPDATE b = VALUES(b), c = VALUES(c)`,
+			expect: `INSERT INTO foo (a,b,c,d) VALUES (:name, :age, :first, :last),(:name, :age, :first, :last) ON DUPLICATE KEY UPDATE b = VALUES(b), c = VALUES(c)`,
+			loop:   2,
+		},
+		{
+			name:   `functions inside values`,
+			query:  `INSERT INTO foo (a,b,c,d) VALUES (:name, cast(:age as int), :first, :last)`,
+			expect: `INSERT INTO foo (a,b,c,d) VALUES (:name, cast(:age as int), :first, :last),(:name, cast(:age as int), :first, :last)`,
+			loop:   2,
+		},
+		{
+			name:   `values table suffix`,
+			query:  `INSERT INTO foo_values (a,b,c,d) VALUES (?, ?, ?, ?)`,
+			expect: `INSERT INTO foo_values (a,b,c,d) VALUES (?, ?, ?, ?),(?, ?, ?, ?)`,
+			loop:   2,
+		},
+		{
+			name:   `values table suffix without column list`,
+			query:  `INSERT INTO foo_values VALUES (?, ?, ?, ?)`,
+			expect: `INSERT INTO foo_values VALUES (?, ?, ?, ?),(?, ?, ?, ?)`,
+			loop:   2,
+		},
+		{
+			name:   `values table without column list`,
+			query:  "INSERT INTO `values` VALUES (?, ?, ?, ?)",
+			expect: "INSERT INTO `values` VALUES (?, ?, ?, ?),(?, ?, ?, ?)",
+			loop:   2,
+		},
+		{
+			name:   `values table without column list no space`,
+			query:  "INSERT INTO `values`VALUES (?, ?, ?, ?)",
+			expect: "INSERT INTO `values`VALUES (?, ?, ?, ?),(?, ?, ?, ?)",
+			loop:   2,
+		},
 	}
 
 	for _, tc := range table {
@@ -364,18 +430,4 @@ func TestFixBounds(t *testing.T) {
 			}
 		})
 	}
-
-	t.Run("regex changed", func(t *testing.T) {
-		var valueBracketRegChanged = regexp.MustCompile(`(VALUES)\s+(\([^(]*.[^(]\))`)
-		saveRegexp := valueBracketReg
-		defer func() {
-			valueBracketReg = saveRegexp
-		}()
-		valueBracketReg = valueBracketRegChanged
-
-		res := fixBound("VALUES (:a, :b)", 2)
-		if res != "VALUES (:a, :b)" {
-			t.Errorf("changed regex should return string")
-		}
-	})
 }
